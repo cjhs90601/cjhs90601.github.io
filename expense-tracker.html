@@ -1,0 +1,998 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>記帳通</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans TC', sans-serif; background: #f1f5f9; }
+  .spinner { border: 3px solid #e2e8f0; border-top-color: #4f46e5; border-radius: 50%; width: 24px; height: 24px; animation: spin 0.7s linear infinite; display: inline-block; vertical-align: middle; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .fade-in { animation: fadeIn 0.25s ease; }
+  @keyframes fadeIn { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:translateY(0); } }
+  .cat-tag { display:inline-flex; align-items:center; padding:1px 7px; border-radius:20px; font-size:11px; font-weight:500; }
+  ::-webkit-scrollbar { width:5px; } ::-webkit-scrollbar-thumb { background:#cbd5e1; border-radius:3px; }
+</style>
+</head>
+<body>
+
+<!-- ===== SETUP MODAL ===== -->
+<div id="setupModal" class="hidden fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+  <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 fade-in">
+    <div class="text-center mb-5">
+      <div class="text-5xl mb-2">💳</div>
+      <h1 class="text-2xl font-bold text-gray-800">記帳通設定</h1>
+      <p class="text-gray-500 text-sm mt-1">首次使用需要設定 Google OAuth Client ID</p>
+    </div>
+    <div class="space-y-4">
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Google OAuth Client ID</label>
+        <input id="clientIdInput" type="text" placeholder="xxxxxx.apps.googleusercontent.com"
+          class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+      </div>
+      <div class="bg-blue-50 rounded-lg p-4 text-xs text-blue-800 space-y-1.5">
+        <p class="font-semibold">快速設定步驟：</p>
+        <ol class="list-decimal ml-4 space-y-1">
+          <li>前往 <a href="https://console.cloud.google.com" target="_blank" class="underline font-semibold">Google Cloud Console</a>，建立或選取一個專案</li>
+          <li>啟用 <strong>Gmail API</strong> 與 <strong>Google Sheets API</strong></li>
+          <li>建立 OAuth 2.0 憑證（類型：Web 應用程式）</li>
+          <li>授權 JavaScript 來源加入：<code class="bg-blue-100 px-1 rounded">http://localhost:8080</code></li>
+          <li>複製 Client ID 貼到上方欄位</li>
+          <li>用以下指令啟動伺服器後開啟 <code class="bg-blue-100 px-1 rounded">http://localhost:8080</code>：<br>
+            <code class="bg-blue-100 px-1 rounded">python -m http.server 8080</code></li>
+        </ol>
+      </div>
+      <button onclick="saveClientId()"
+        class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-2.5 rounded-lg transition-colors text-sm">
+        儲存並繼續
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ===== LOGIN SCREEN ===== -->
+<div id="loginScreen" class="hidden min-h-screen flex items-center justify-center p-4">
+  <div class="bg-white rounded-3xl shadow-xl p-10 max-w-sm w-full text-center">
+    <div class="text-6xl mb-4">💳</div>
+    <h1 class="text-3xl font-bold text-gray-800 mb-2">記帳通</h1>
+    <p class="text-gray-500 mb-8 text-sm leading-relaxed">自動偵測 Gmail 刷卡通知<br>輕鬆管理每月消費</p>
+    <button onclick="signInWithRedirect()"
+      class="flex items-center gap-3 mx-auto bg-white border border-gray-300 rounded-xl px-6 py-3 shadow hover:shadow-md transition-all active:scale-95">
+      <svg width="20" height="20" viewBox="0 0 48 48">
+        <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
+        <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
+        <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
+        <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.18 1.48-4.97 2.31-8.16 2.31-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
+      </svg>
+      <span class="font-medium text-gray-700">使用 Google 帳號登入</span>
+    </button>
+    <p class="text-xs text-gray-400 mt-5">登入後授權讀取 Gmail 通知及存取 Google 試算表</p>
+
+    <!-- Redirect URI 提示區塊 -->
+    <div class="mt-4 bg-amber-50 border border-amber-200 rounded-xl p-3 text-left">
+      <p class="text-xs font-semibold text-amber-800 mb-1.5">⚠️ 若出現「要求無效」錯誤，請將以下網址加入 Google Cloud Console：</p>
+      <p class="text-xs text-amber-700 mb-1">APIs & Services → Credentials → OAuth 用戶端 → <strong>Authorized redirect URIs</strong></p>
+      <div class="flex items-center gap-2">
+        <code id="redirectUriDisplay" class="flex-1 text-xs bg-white border border-amber-300 rounded-lg px-2 py-1.5 break-all text-amber-900 select-all"></code>
+        <button onclick="copyRedirectUri()" class="flex-shrink-0 text-xs bg-amber-500 hover:bg-amber-600 text-white px-2 py-1.5 rounded-lg transition-colors">複製</button>
+      </div>
+    </div>
+
+    <button onclick="showSetupModal()" class="mt-3 text-xs text-gray-400 hover:text-gray-600 underline">重新設定 Client ID</button>
+  </div>
+</div>
+
+<!-- ===== MAIN APP ===== -->
+<div id="mainApp" class="hidden min-h-screen">
+
+  <!-- Header -->
+  <header class="bg-white border-b border-gray-200 sticky top-0 z-40">
+    <div class="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
+      <div class="flex items-center gap-2">
+        <span class="text-2xl">💳</span>
+        <span class="font-bold text-gray-800 text-lg">記帳通</span>
+      </div>
+
+      <div class="flex items-center gap-1.5">
+        <button onclick="changeMonth(-1)" class="p-1.5 rounded-lg hover:bg-gray-100 text-gray-600">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+        </button>
+        <span id="monthLabel" class="font-semibold text-gray-800 w-28 text-center text-sm"></span>
+        <button onclick="changeMonth(1)" class="p-1.5 rounded-lg hover:bg-gray-100 text-gray-600">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+        </button>
+      </div>
+
+      <div class="flex items-center gap-2">
+        <a id="sheetLink" href="#" target="_blank" class="hidden text-xs text-indigo-600 hover:underline bg-indigo-50 px-2.5 py-1.5 rounded-lg">📊 試算表</a>
+        <button id="syncBtn" onclick="syncGmail()"
+          class="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium px-3.5 py-1.5 rounded-lg transition-colors">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+          同步 Gmail
+        </button>
+        <img id="userAvatar" class="w-8 h-8 rounded-full hidden" src="" alt="">
+        <button onclick="signOut()" class="text-xs text-gray-400 hover:text-gray-600">登出</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-6xl mx-auto px-4 py-5 space-y-5">
+
+    <!-- Summary Cards -->
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div class="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
+        <p class="text-xs text-gray-500 mb-1">本月支出</p>
+        <p id="statTotal" class="text-xl font-bold text-gray-800">NT$0</p>
+      </div>
+      <div class="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
+        <p class="text-xs text-gray-500 mb-1">本月筆數</p>
+        <p id="statCount" class="text-xl font-bold text-gray-800">0 筆</p>
+      </div>
+      <div class="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
+        <p class="text-xs text-gray-500 mb-1">日均支出</p>
+        <p id="statAvg" class="text-xl font-bold text-gray-800">NT$0</p>
+      </div>
+      <div class="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
+        <p class="text-xs text-gray-500 mb-1">最大單筆</p>
+        <p id="statMax" class="text-xl font-bold text-gray-800">NT$0</p>
+      </div>
+    </div>
+
+    <!-- Charts -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div class="md:col-span-2 bg-white rounded-xl p-4 shadow-sm border border-gray-100">
+        <h3 class="text-sm font-semibold text-gray-600 mb-3">每日支出趨勢</h3>
+        <canvas id="dailyChart" height="110"></canvas>
+      </div>
+      <div class="bg-white rounded-xl p-4 shadow-sm border border-gray-100">
+        <h3 class="text-sm font-semibold text-gray-600 mb-3">類別分布</h3>
+        <canvas id="catChart" height="110"></canvas>
+      </div>
+    </div>
+
+    <!-- Transaction List -->
+    <div class="bg-white rounded-xl shadow-sm border border-gray-100">
+      <div class="p-4 border-b border-gray-100 flex items-center justify-between gap-3 flex-wrap">
+        <h3 class="font-semibold text-gray-700 text-sm">交易記錄</h3>
+        <div class="flex items-center gap-2 flex-wrap">
+          <input id="searchInput" type="text" placeholder="搜尋商家..." oninput="renderTxList()"
+            class="border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 w-32">
+          <select id="catFilter" onchange="renderTxList()"
+            class="border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+            <option value="">全部類別</option>
+          </select>
+          <button onclick="openAddModal()"
+            class="flex items-center gap-1 bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-medium px-3 py-1.5 rounded-lg transition-colors">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+            新增
+          </button>
+        </div>
+      </div>
+      <div id="txList" class="divide-y divide-gray-50 min-h-[60px]"></div>
+      <div id="emptyState" class="hidden py-14 text-center">
+        <div class="text-4xl mb-3">📭</div>
+        <p class="text-gray-500 text-sm">本月尚無交易記錄</p>
+        <p class="text-gray-400 text-xs mt-1">點「同步 Gmail」自動匯入刷卡通知，或手動新增</p>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- ===== ADD/EDIT MODAL ===== -->
+<div id="txModal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+  <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 fade-in">
+    <div class="flex items-center justify-between mb-5">
+      <h3 id="txModalTitle" class="font-bold text-gray-800 text-lg">新增交易</h3>
+      <button onclick="closeModal('txModal')" class="text-gray-400 hover:text-gray-600">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <form id="txForm" onsubmit="saveTx(event)" class="space-y-4">
+      <input type="hidden" id="txRowIndex">
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="block text-xs font-medium text-gray-700 mb-1">日期</label>
+          <input id="txDate" type="date" required class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-gray-700 mb-1">時間</label>
+          <input id="txTime" type="time" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+        </div>
+      </div>
+      <div>
+        <label class="block text-xs font-medium text-gray-700 mb-1">金額 (NT$)</label>
+        <input id="txAmount" type="number" min="1" step="1" placeholder="0" required
+          class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+      </div>
+      <div>
+        <label class="block text-xs font-medium text-gray-700 mb-1">商家</label>
+        <input id="txMerchant" type="text" placeholder="商家名稱" required
+          class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="block text-xs font-medium text-gray-700 mb-1">類別</label>
+          <select id="txCategory" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+            <option>餐飲</option><option>交通</option><option>購物</option><option>娛樂</option>
+            <option>醫療</option><option>教育</option><option>住宿</option><option>超市</option>
+            <option>訂閱</option><option>其他</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-gray-700 mb-1">卡號末4碼</label>
+          <input id="txCard" type="text" maxlength="4" placeholder="1234"
+            class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+        </div>
+      </div>
+      <div>
+        <label class="block text-xs font-medium text-gray-700 mb-1">備註</label>
+        <input id="txNote" type="text" placeholder="選填"
+          class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+      </div>
+      <div class="flex gap-3 pt-1">
+        <button type="button" onclick="closeModal('txModal')"
+          class="flex-1 border border-gray-300 text-gray-700 font-medium py-2.5 rounded-lg hover:bg-gray-50 text-sm">取消</button>
+        <button type="submit"
+          class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-medium py-2.5 rounded-lg text-sm">儲存</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ===== GMAIL SYNC MODAL ===== -->
+<div id="syncModal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+  <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col fade-in">
+    <div class="p-5 border-b border-gray-100 flex items-center justify-between">
+      <h3 class="font-bold text-gray-800 text-lg">Gmail 同步</h3>
+      <button onclick="closeModal('syncModal')" class="text-gray-400 hover:text-gray-600">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <div id="syncContent" class="flex-1 overflow-y-auto p-5"></div>
+    <div id="syncFooter" class="hidden p-4 border-t border-gray-100 flex items-center justify-between">
+      <span id="syncSummaryText" class="text-sm text-gray-600"></span>
+      <div class="flex gap-2">
+        <button onclick="closeModal('syncModal')" class="border border-gray-300 text-gray-700 px-4 py-2 rounded-lg text-sm hover:bg-gray-50">取消</button>
+        <button id="importBtn" onclick="importSelected()"
+          class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm font-medium">匯入選取</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== TOAST ===== -->
+<div id="toast" class="hidden fixed bottom-5 right-5 z-50 bg-gray-800 text-white px-4 py-2.5 rounded-lg text-sm shadow-xl fade-in"></div>
+
+<script>
+// ============================================================
+// Constants & Config
+// ============================================================
+const SCOPES = 'https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/spreadsheets';
+const SHEET_NAME = '交易記錄';
+const COL_HEADERS = ['日期','時間','金額','商家','類別','信用卡末4碼','備註','來源','GmailID'];
+const CLIENT_ID_KEY = 'expense_cid';
+const SHEET_ID_KEY  = 'expense_sid';
+const CATEGORIES = ['餐飲','交通','購物','娛樂','醫療','教育','住宿','超市','訂閱','其他'];
+const CAT_COLORS = {
+  餐飲:'#f97316', 交通:'#3b82f6', 購物:'#ec4899', 娛樂:'#a855f7',
+  醫療:'#ef4444', 教育:'#06b6d4', 住宿:'#f59e0b', 超市:'#10b981',
+  訂閱:'#6366f1', 其他:'#6b7280'
+};
+const CAT_ICONS = {
+  餐飲:'🍽️', 交通:'🚗', 購物:'🛍️', 娛樂:'🎮', 醫療:'💊',
+  教育:'📚', 住宿:'🏨', 超市:'🛒', 訂閱:'📱', 其他:'💼'
+};
+
+// ============================================================
+// State
+// ============================================================
+let CLIENT_ID      = localStorage.getItem(CLIENT_ID_KEY) || '';
+let spreadsheetId  = localStorage.getItem(SHEET_ID_KEY) || null;
+let sheetNumericId = 0;
+let accessToken    = null;
+let tokenClient    = null;
+let currentUser    = null;
+let allTx          = [];   // all loaded transactions
+let currentMonth   = new Date();
+let chartDaily     = null;
+let chartCat       = null;
+let pendingGmail   = [];   // parsed from Gmail, awaiting import
+
+// ============================================================
+// Bootstrap - Redirect OAuth Flow (支援手機/桌機所有瀏覽器)
+// ============================================================
+window.addEventListener('load', async () => {
+  // 顯示目前頁面的 redirect URI，讓使用者知道要填什麼
+  const el = document.getElementById('redirectUriDisplay');
+  if (el) el.textContent = window.location.origin + window.location.pathname;
+
+  if (!CLIENT_ID) {
+    showModal('setupModal');
+    return;
+  }
+  document.getElementById('loginScreen').classList.remove('hidden');
+
+  // 從 Google 跳轉回來時，URL hash 會帶有 access_token
+  if (window.location.hash.includes('access_token')) {
+    await handleOAuthRedirect();
+  }
+});
+
+function copyRedirectUri() {
+  const uri = window.location.origin + window.location.pathname;
+  navigator.clipboard.writeText(uri).then(() => showToast('已複製 Redirect URI'));
+}
+
+function signInWithRedirect() {
+  if (!CLIENT_ID) { showModal('setupModal'); return; }
+  const redirectUri = window.location.origin + window.location.pathname;
+  const params = new URLSearchParams({
+    client_id:     CLIENT_ID,
+    redirect_uri:  redirectUri,
+    response_type: 'token',
+    scope:         SCOPES,
+    prompt:        'select_account'
+  });
+  window.location.href = 'https://accounts.google.com/o/oauth2/v2/auth?' + params;
+}
+
+async function handleOAuthRedirect() {
+  const params = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+  // 清除 URL hash，避免重新整理重複觸發
+  history.replaceState(null, null, window.location.pathname + window.location.search);
+
+  const error = params.get('error');
+  if (error) { showToast('登入失敗：' + error, true); return; }
+
+  const token = params.get('access_token');
+  if (!token) return;
+
+  accessToken = token;
+
+  try {
+    const info = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+      headers: { Authorization: `Bearer ${token}` }
+    }).then(r => r.json());
+    currentUser = { name: info.name, email: info.email, picture: info.picture };
+    await onAuthenticated();
+  } catch (e) {
+    showToast('取得用戶資料失敗，請重試', true);
+  }
+}
+
+function saveClientId() {
+  const v = document.getElementById('clientIdInput').value.trim();
+  if (!v) { showToast('請輸入 Client ID', true); return; }
+  CLIENT_ID = v;
+  localStorage.setItem(CLIENT_ID_KEY, v);
+  closeModal('setupModal');
+  document.getElementById('loginScreen').classList.remove('hidden');
+}
+
+function showSetupModal() {
+  document.getElementById('clientIdInput').value = CLIENT_ID;
+  showModal('setupModal');
+}
+
+async function onAuthenticated() {
+  document.getElementById('loginScreen').classList.add('hidden');
+  document.getElementById('mainApp').classList.remove('hidden');
+  if (currentUser?.picture) {
+    const av = document.getElementById('userAvatar');
+    av.src = currentUser.picture;
+    av.classList.remove('hidden');
+  }
+  await initSpreadsheet();
+  await loadTransactions();
+  renderAll();
+}
+
+function signOut() {
+  accessToken = null; currentUser = null; allTx = [];
+  document.getElementById('mainApp').classList.add('hidden');
+  document.getElementById('loginScreen').classList.remove('hidden');
+}
+
+// ============================================================
+// Spreadsheet Init & CRUD
+// ============================================================
+async function initSpreadsheet() {
+  if (spreadsheetId) {
+    try {
+      const info = await apiGet(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?fields=spreadsheetId,sheets.properties`);
+      const sh = info.sheets?.find(s => s.properties.title === SHEET_NAME);
+      sheetNumericId = sh ? sh.properties.sheetId : 0;
+      setSheetLink();
+      return;
+    } catch { spreadsheetId = null; localStorage.removeItem(SHEET_ID_KEY); }
+  }
+  showToast('建立 Google 試算表中...');
+  const body = {
+    properties: { title: '記帳通' },
+    sheets: [{
+      properties: { title: SHEET_NAME },
+      data: [{ rowData: [{ values: COL_HEADERS.map(h => ({ userEnteredValue: { stringValue: h }, userEnteredFormat: { textFormat: { bold: true } } })) }] }]
+    }]
+  };
+  const resp = await apiPost('https://sheets.googleapis.com/v4/spreadsheets', body);
+  spreadsheetId = resp.spreadsheetId;
+  sheetNumericId = resp.sheets[0].properties.sheetId;
+  localStorage.setItem(SHEET_ID_KEY, spreadsheetId);
+  setSheetLink();
+  showToast('試算表建立完成');
+}
+
+function setSheetLink() {
+  const a = document.getElementById('sheetLink');
+  a.href = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/edit`;
+  a.classList.remove('hidden');
+}
+
+async function loadTransactions() {
+  const resp = await apiGet(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(SHEET_NAME)}`);
+  const rows = resp.values || [];
+  allTx = rows.slice(1).map((r, i) => ({
+    date:     r[0] || '',
+    time:     r[1] || '',
+    amount:   parseFloat(r[2]) || 0,
+    merchant: r[3] || '',
+    category: r[4] || '其他',
+    card:     r[5] || '',
+    note:     r[6] || '',
+    source:   r[7] || '手動',
+    gmailId:  r[8] || '',
+    rowIndex: i + 2
+  })).filter(t => t.amount > 0);
+}
+
+async function appendRows(rows) {
+  const values = rows.map(t => [t.date, t.time, t.amount, t.merchant, t.category, t.card, t.note, t.source, t.gmailId]);
+  await apiPost(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(SHEET_NAME)}:append?valueInputOption=RAW`, { values });
+}
+
+async function updateRow(rowIndex, t) {
+  const range = `${SHEET_NAME}!A${rowIndex}:I${rowIndex}`;
+  await apiPut(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}?valueInputOption=RAW`,
+    { values: [[t.date, t.time, t.amount, t.merchant, t.category, t.card, t.note, t.source, t.gmailId]] });
+}
+
+async function deleteRow(rowIndex) {
+  await apiPost(`https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}:batchUpdate`, {
+    requests: [{ deleteDimension: { range: { sheetId: sheetNumericId, dimension: 'ROWS', startIndex: rowIndex - 1, endIndex: rowIndex } } }]
+  });
+}
+
+// ============================================================
+// Gmail Parsers
+// ============================================================
+const BANK_PARSERS = [
+  {
+    name: '玉山銀行',
+    test: (from, subj) => /esunbank|e\.sun/i.test(from) || /玉山/.test(subj),
+    amount:   [/消費金額[：:]\s*NT\$?\s*([\d,]+)/i, /NT\$\s*([\d,]+)/i],
+    merchant: [/消費商家[：:]\s*([^\n\r<]+)/, /特店名稱[：:]\s*([^\n\r<]+)/],
+    date:     [/消費時間[：:]\s*([\d/年月日 :]+)/],
+    card:     [/末[四4]碼[：:\s]*(\d{4})/]
+  },
+  {
+    name: '國泰世華',
+    test: (from, subj) => /cathaybank|cathaybk/i.test(from) || /國泰/.test(subj),
+    amount:   [/交易金額[：:]\s*NT\$?\s*([\d,]+)/i, /消費金額[：:]\s*NT\$?\s*([\d,]+)/i],
+    merchant: [/特店名稱[：:]\s*([^\n\r<]+)/, /消費商店[：:]\s*([^\n\r<]+)/],
+    date:     [/交易日期[：:]\s*([\d/年月日]+)/, /消費日期[：:]\s*([\d/年月日]+)/],
+    card:     [/末[四4]碼[：:\s]*(\d{4})/]
+  },
+  {
+    name: '中信銀行',
+    test: (from, subj) => /ctbc|chinatrust/i.test(from) || /中信/.test(subj),
+    amount:   [/消費金額[：:]\s*(?:新台幣)?\s*([\d,]+)/i, /NT\$?\s*([\d,]+)/i],
+    merchant: [/消費商店[：:]\s*([^\n\r<]+)/, /商店名稱[：:]\s*([^\n\r<]+)/],
+    date:     [/消費時間[：:]\s*([\d/年月日 :]+)/],
+    card:     [/末[四4]碼[：:\s]*(\d{4})/]
+  },
+  {
+    name: '台新銀行',
+    test: (from, subj) => /taishinbank|taishin/i.test(from) || /台新/.test(subj),
+    amount:   [/消費金額\s*NT\$?\s*([\d,]+)/i, /NT\$?\s*([\d,]+)/i],
+    merchant: [/消費商店\s*([^\n\r<]+)/],
+    date:     [/消費時間\s*([\d/年月日 :]+)/],
+    card:     [/末[四4]碼[：:\s]*(\d{4})/]
+  },
+  {
+    name: '富邦銀行',
+    test: (from, subj) => /fubon|taipeibank/i.test(from) || /富邦/.test(subj),
+    amount:   [/消費金額[：:]\s*NT\$?\s*([\d,]+)/i],
+    merchant: [/消費商店[：:]\s*([^\n\r<]+)/],
+    date:     [/消費時間[：:]\s*([\d/年月日 :]+)/],
+    card:     [/末[四4]碼[：:\s]*(\d{4})/]
+  },
+  {
+    name: '永豐銀行',
+    test: (from, subj) => /sinopac/i.test(from) || /永豐/.test(subj),
+    amount:   [/消費金額[：:]\s*NT\$?\s*([\d,]+)/i, /NT\$?\s*([\d,]+)/i],
+    merchant: [/消費商店[：:]\s*([^\n\r<]+)/],
+    date:     [/消費時間[：:]\s*([\d/年月日 :]+)/],
+    card:     [/末[四4]碼[：:\s]*(\d{4})/]
+  },
+  {
+    // 格式：您的旅人無限卡末四碼4818，於2026/05/20，有一筆網路刷卡消費<新臺幣 TWD>470元
+    name: '匯豐銀行',
+    test: (from, subj) => /messaging\.hsbc|hsbc\.com\.tw/i.test(from) || /匯豐/.test(subj),
+    amount:   [
+      /TWD\s*>?\s*([\d,]+)\s*元/i,              // 純文字：TWD>470元
+      /新臺幣\s*(?:TWD\s*)?>?\s*([\d,]+)\s*元/i, // 含幣別：新臺幣 TWD>470元
+      /消費[^\d\n\r]{0,30}([\d,]+)\s*元/        // HTML 去標籤後：消費470元
+    ],
+    merchant: [
+      /消費商店[：:]\s*([^\n\r<]+)/,
+      /特店名稱[：:]\s*([^\n\r<]+)/,
+      /Merchant[：:\s]+([^\n\r<]+)/i
+    ],
+    date:     [/於(\d{4}[\/\-]\d{1,2}[\/\-]\d{1,2})/],
+    card:     [/末四碼(\d{4})/]
+  }
+];
+
+const GENERIC = {
+  name: '通用',
+  amount:   [/消費金額[：:]\s*NT\$?\s*([\d,]+)/i, /交易金額[：:]\s*NT\$?\s*([\d,]+)/i,
+             /NT\$?\s*([\d,]+)/i, /新[台臺]幣\s*(?:TWD\s*)?>?\s*([\d,]+)\s*元/i, /金額[：:]\s*([\d,]+)/i],
+  merchant: [/消費商家[：:]\s*([^\n\r<]+)/, /特店名稱[：:]\s*([^\n\r<]+)/,
+             /消費商店[：:]\s*([^\n\r<]+)/, /商店名稱[：:]\s*([^\n\r<]+)/,
+             /消費地點[：:]\s*([^\n\r<]+)/],
+  date:     [/消費時間[：:]\s*([\d/年月日 :]+)/, /交易日期[：:]\s*([\d/年月日]+)/,
+             /消費日期[：:]\s*([\d/年月日]+)/],
+  card:     [/末[四4]碼[：:\s]*(\d{4})/]
+};
+
+function rxFirst(text, patterns) {
+  for (const p of patterns) { const m = text.match(p); if (m) return m[1].trim(); }
+  return null;
+}
+
+function parseDate(str) {
+  if (!str) return null;
+  const m = str.match(/(\d{4})[\/\-年](\d{1,2})[\/\-月](\d{1,2})/);
+  if (m) return `${m[1]}-${m[2].padStart(2,'0')}-${m[3].padStart(2,'0')}`;
+  return null;
+}
+
+function getEmailBody(payload) {
+  if (!payload) return '';
+  if (payload.mimeType === 'text/plain' && payload.body?.data) return b64decode(payload.body.data);
+  if (payload.parts) {
+    for (const p of payload.parts) {
+      if (p.mimeType === 'text/plain' && p.body?.data) return b64decode(p.body.data);
+    }
+    for (const p of payload.parts) {
+      if (p.mimeType === 'text/html' && p.body?.data) {
+        const html = b64decode(p.body.data);
+        const doc = new DOMParser().parseFromString(html, 'text/html');
+        return doc.body.textContent || '';
+      }
+    }
+    for (const p of payload.parts) { const nested = getEmailBody(p); if (nested) return nested; }
+  }
+  if (payload.body?.data) return b64decode(payload.body.data);
+  return '';
+}
+
+function b64decode(str) {
+  const b = str.replace(/-/g, '+').replace(/_/g, '/');
+  try {
+    return decodeURIComponent(atob(b).split('').map(c => '%' + c.charCodeAt(0).toString(16).padStart(2,'0')).join(''));
+  } catch { try { return atob(b); } catch { return ''; } }
+}
+
+function parseMessage(msg) {
+  const hdrs  = msg.payload?.headers || [];
+  const subj  = hdrs.find(h => h.name === 'Subject')?.value || '';
+  const from  = hdrs.find(h => h.name === 'From')?.value || '';
+  const hDate = hdrs.find(h => h.name === 'Date')?.value || '';
+  const body  = getEmailBody(msg.payload);
+  const text  = `${subj}\n${body}`;
+
+  const isCreditCard = /消費|刷卡|信用卡|交易通知/.test(subj + body);
+  if (!isCreditCard) return null;
+
+  const parser = BANK_PARSERS.find(p => p.test(from, subj)) || GENERIC;
+  const bankName = parser.name;
+
+  const amountStr = rxFirst(text, parser.amount);
+  const amount = amountStr ? parseFloat(amountStr.replace(/,/g,'')) : null;
+  if (!amount || amount <= 0) return null;
+
+  const merchant = rxFirst(text, parser.merchant) || '未知商家';
+  const dateStr  = rxFirst(text, parser.date);
+  const date     = parseDate(dateStr) || fmtDate(new Date(hDate));
+  const card     = rxFirst(text, parser.card) || '';
+  const timeM    = body.match(/(\d{2}:\d{2})/);
+  const time     = timeM ? timeM[1] : '';
+
+  return { date, time, amount, merchant, category: guessCategory(merchant), card, note: '', source: 'Gmail', gmailId: msg.id, bankName };
+}
+
+function guessCategory(merchant) {
+  const m = merchant.toLowerCase();
+  if (/餐|食|飯|麵|咖啡|cafe|restaurant|food|pizza|mcdonald|kfc|subway|starbucks|85度/.test(m)) return '餐飲';
+  if (/uber|taxi|捷運|高鐵|台鐵|機票|油|停車|fuel|gas/.test(m)) return '交通';
+  if (/amazon|蝦皮|shopee|pchome|momo|yahoo.*購物|costco|ikea/.test(m)) return '購物';
+  if (/netflix|spotify|youtube|apple|google.*play|steam|game|cinema|電影|ktv/.test(m)) return '娛樂';
+  if (/醫院|診所|藥局|pharmacy|clinic|hospital/.test(m)) return '醫療';
+  if (/大學|學校|補習|書局|tutor/.test(m)) return '教育';
+  if (/hotel|airbnb|旅館|hostel/.test(m)) return '住宿';
+  if (/全聯|seven|7-11|family.*mart|全家|萊爾富|supermarket|超市/.test(m)) return '超市';
+  if (/adobe|microsoft|github|notion|線上/.test(m)) return '訂閱';
+  return '其他';
+}
+
+// ============================================================
+// Gmail Sync
+// ============================================================
+async function syncGmail() {
+  const btn = document.getElementById('syncBtn');
+  btn.disabled = true;
+  btn.innerHTML = `<span class="spinner" style="width:16px;height:16px;border-width:2px"></span> 同步中...`;
+  showModal('syncModal');
+  document.getElementById('syncContent').innerHTML = `
+    <div class="flex flex-col items-center justify-center py-16 gap-4">
+      <div class="spinner" style="width:44px;height:44px;border-width:4px"></div>
+      <p class="text-gray-600 text-sm">正在讀取 Gmail 刷卡通知...</p>
+    </div>`;
+  document.getElementById('syncFooter').classList.add('hidden');
+
+  try {
+    const q = encodeURIComponent('(subject:消費通知 OR subject:刷卡通知 OR subject:消費提醒 OR subject:交易通知 OR subject:消費) newer_than:30d');
+    const { messages = [] } = await apiGet(`https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${q}&maxResults=50`);
+
+    if (!messages.length) {
+      document.getElementById('syncContent').innerHTML = `
+        <div class="text-center py-16"><div class="text-5xl mb-3">📭</div>
+        <p class="text-gray-600 font-medium">近 30 天沒有找到刷卡通知</p>
+        <p class="text-gray-400 text-sm mt-1">請確認銀行已開啟 Email 消費通知</p></div>`;
+      return;
+    }
+
+    const existingIds = new Set(allTx.map(t => t.gmailId).filter(Boolean));
+    const parsed = [];
+
+    for (const msg of messages) {
+      if (existingIds.has(msg.id)) continue;
+      try {
+        const detail = await apiGet(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${msg.id}?format=full`);
+        const tx = parseMessage(detail);
+        if (tx) parsed.push({ ...tx, selected: true });
+      } catch (e) { console.warn('skip', msg.id, e); }
+    }
+
+    pendingGmail = parsed;
+    renderSyncResults(parsed, messages.length - parsed.length);
+  } catch (e) {
+    document.getElementById('syncContent').innerHTML = `
+      <div class="text-center py-16"><div class="text-4xl mb-3">⚠️</div>
+      <p class="text-red-500 font-medium">同步失敗</p><p class="text-gray-400 text-sm mt-1">${e.message}</p></div>`;
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = `<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg> 同步 Gmail`;
+  }
+}
+
+function renderSyncResults(results, alreadyCount) {
+  const content = document.getElementById('syncContent');
+  const footer  = document.getElementById('syncFooter');
+
+  if (!results.length) {
+    content.innerHTML = `
+      <div class="text-center py-16"><div class="text-5xl mb-3">✅</div>
+      <p class="text-gray-700 font-medium">沒有新的刷卡記錄</p>
+      <p class="text-gray-400 text-sm mt-1">已有 ${alreadyCount} 筆交易紀錄</p></div>`;
+    return;
+  }
+
+  content.innerHTML = `
+    <div class="flex items-center mb-3">
+      <span class="text-sm text-gray-600">找到 <strong>${results.length}</strong> 筆新交易，確認後匯入</span>
+      <label class="ml-auto flex items-center gap-1.5 text-sm cursor-pointer">
+        <input type="checkbox" id="selectAllCb" checked onchange="toggleAll(this.checked)" class="rounded"> 全選
+      </label>
+    </div>
+    <div class="space-y-2" id="syncList">
+      ${results.map((tx, i) => `
+        <div class="flex items-center gap-3 p-3 rounded-xl border border-gray-200 hover:bg-gray-50 cursor-pointer transition-colors" onclick="toggleItem(${i})" id="si${i}">
+          <input type="checkbox" checked onclick="event.stopPropagation(); pendingGmail[${i}].selected=this.checked; updateSyncFooter()" class="rounded flex-shrink-0">
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center justify-between gap-2">
+              <span class="font-medium text-gray-800 truncate text-sm">${tx.merchant}</span>
+              <span class="font-bold text-red-500 text-sm flex-shrink-0">-NT$${tx.amount.toLocaleString()}</span>
+            </div>
+            <div class="flex items-center gap-2 mt-0.5 flex-wrap">
+              <span class="text-xs text-gray-400">${tx.date}${tx.time?' '+tx.time:''}</span>
+              <span class="cat-tag" style="background:${CAT_COLORS[tx.category]}18;color:${CAT_COLORS[tx.category]}">${tx.category}</span>
+              <span class="text-xs text-gray-400">${tx.bankName}</span>
+              ${tx.card?`<span class="text-xs text-gray-400">••••${tx.card}</span>`:''}
+            </div>
+          </div>
+        </div>`).join('')}
+    </div>`;
+
+  footer.classList.remove('hidden');
+  updateSyncFooter();
+}
+
+function toggleItem(i) {
+  pendingGmail[i].selected = !pendingGmail[i].selected;
+  const cb = document.querySelector(`#si${i} input[type=checkbox]`);
+  if (cb) cb.checked = pendingGmail[i].selected;
+  updateSyncFooter();
+}
+
+function toggleAll(v) {
+  pendingGmail.forEach((t, i) => {
+    t.selected = v;
+    const cb = document.querySelector(`#si${i} input[type=checkbox]`);
+    if (cb) cb.checked = v;
+  });
+  updateSyncFooter();
+}
+
+function updateSyncFooter() {
+  const sel = pendingGmail.filter(t => t.selected);
+  const total = sel.reduce((s, t) => s + t.amount, 0);
+  document.getElementById('syncSummaryText').textContent = `已選 ${sel.length} 筆，合計 NT$${total.toLocaleString()}`;
+}
+
+async function importSelected() {
+  const toImport = pendingGmail.filter(t => t.selected);
+  if (!toImport.length) { showToast('請選擇要匯入的交易', true); return; }
+  const btn = document.getElementById('importBtn');
+  btn.disabled = true; btn.textContent = '匯入中...';
+  try {
+    await appendRows(toImport);
+    await loadTransactions();
+    renderAll();
+    closeModal('syncModal');
+    showToast(`成功匯入 ${toImport.length} 筆交易`);
+  } catch (e) { showToast('匯入失敗: ' + e.message, true); }
+  finally { btn.disabled = false; btn.textContent = '匯入選取'; }
+}
+
+// ============================================================
+// Render
+// ============================================================
+function renderAll() {
+  document.getElementById('monthLabel').textContent =
+    `${currentMonth.getFullYear()} 年 ${currentMonth.getMonth()+1} 月`;
+  const txs = filteredTx();
+  renderStats(txs);
+  renderDailyChart(txs);
+  renderCatChart(txs);
+  renderCatFilter();
+  renderTxList();
+}
+
+function filteredTx() {
+  const y = currentMonth.getFullYear(), m = currentMonth.getMonth();
+  const q = (document.getElementById('searchInput')?.value||'').toLowerCase();
+  const c = document.getElementById('catFilter')?.value||'';
+  return allTx.filter(t => {
+    if (!t.date) return false;
+    const d = new Date(t.date);
+    if (d.getFullYear() !== y || d.getMonth() !== m) return false;
+    if (q && !t.merchant.toLowerCase().includes(q)) return false;
+    if (c && t.category !== c) return false;
+    return true;
+  });
+}
+
+function changeMonth(d) {
+  currentMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth() + d, 1);
+  renderAll();
+}
+
+function renderStats(txs) {
+  const total = txs.reduce((s,t) => s+t.amount, 0);
+  const days  = new Date(currentMonth.getFullYear(), currentMonth.getMonth()+1, 0).getDate();
+  const max   = txs.length ? Math.max(...txs.map(t => t.amount)) : 0;
+  document.getElementById('statTotal').textContent = `NT$${total.toLocaleString()}`;
+  document.getElementById('statCount').textContent = `${txs.length} 筆`;
+  document.getElementById('statAvg').textContent   = `NT$${Math.round(total/days).toLocaleString()}`;
+  document.getElementById('statMax').textContent   = `NT$${max.toLocaleString()}`;
+}
+
+function renderDailyChart(txs) {
+  const days = new Date(currentMonth.getFullYear(), currentMonth.getMonth()+1, 0).getDate();
+  const daily = {};
+  txs.forEach(t => { const d = parseInt(t.date.split('-')[2]); daily[d] = (daily[d]||0) + t.amount; });
+  const labels = Array.from({length: days}, (_, i) => i+1);
+  const data   = labels.map(d => daily[d]||0);
+
+  if (chartDaily) chartDaily.destroy();
+  chartDaily = new Chart(document.getElementById('dailyChart'), {
+    type: 'bar',
+    data: { labels: labels.map(d => `${d}`), datasets: [{ data, backgroundColor: '#6366f122', borderColor: '#6366f1', borderWidth: 1.5, borderRadius: 3 }] },
+    options: {
+      responsive: true, plugins: { legend: { display: false } },
+      scales: {
+        x: { grid: { display: false }, ticks: { font: { size: 10 }, maxTicksLimit: 10 } },
+        y: { grid: { color: '#f1f5f9' }, ticks: { font: { size: 10 }, callback: v => v >= 1000 ? `${v/1000}k` : v } }
+      }
+    }
+  });
+}
+
+function renderCatChart(txs) {
+  const totals = {};
+  txs.forEach(t => { totals[t.category] = (totals[t.category]||0) + t.amount; });
+  const entries = Object.entries(totals).sort((a,b) => b[1]-a[1]);
+
+  if (chartCat) chartCat.destroy();
+  chartCat = new Chart(document.getElementById('catChart'), {
+    type: 'doughnut',
+    data: {
+      labels: entries.length ? entries.map(([k]) => k) : ['無資料'],
+      datasets: [{ data: entries.length ? entries.map(([,v]) => v) : [1],
+        backgroundColor: entries.length ? entries.map(([k]) => CAT_COLORS[k]||'#6b7280') : ['#e2e8f0'],
+        borderWidth: 2, borderColor: '#fff' }]
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { position: 'right', labels: { font: { size: 11 }, padding: 6, boxWidth: 10 } },
+        tooltip: { callbacks: { label: c => ` NT$${c.raw.toLocaleString()}` } }
+      }
+    }
+  });
+}
+
+function renderCatFilter() {
+  const sel = document.getElementById('catFilter');
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">全部類別</option>';
+  const used = [...new Set(allTx.map(t => t.category).filter(Boolean))];
+  CATEGORIES.filter(c => used.includes(c)).forEach(c => {
+    const o = document.createElement('option');
+    o.value = o.textContent = c;
+    if (c === cur) o.selected = true;
+    sel.appendChild(o);
+  });
+}
+
+function renderTxList() {
+  const txs = filteredTx().sort((a, b) => {
+    const ad = (a.date||'') + (a.time||'00:00');
+    const bd = (b.date||'') + (b.time||'00:00');
+    return bd.localeCompare(ad);
+  });
+  const list  = document.getElementById('txList');
+  const empty = document.getElementById('emptyState');
+  if (!txs.length) { list.innerHTML = ''; empty.classList.remove('hidden'); return; }
+  empty.classList.add('hidden');
+  list.innerHTML = txs.map(tx => `
+    <div class="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 group transition-colors">
+      <div class="w-8 h-8 rounded-full flex items-center justify-center text-base flex-shrink-0"
+           style="background:${CAT_COLORS[tx.category]||'#6b7280'}18">${CAT_ICONS[tx.category]||'💼'}</div>
+      <div class="flex-1 min-w-0">
+        <div class="flex items-center gap-1.5">
+          <span class="font-medium text-gray-800 text-sm truncate">${tx.merchant}</span>
+          ${tx.card?`<span class="text-xs text-gray-400 flex-shrink-0">••••${tx.card}</span>`:''}
+        </div>
+        <div class="flex items-center gap-2 mt-0.5 flex-wrap">
+          <span class="text-xs text-gray-400">${tx.date}${tx.time?' '+tx.time:''}</span>
+          <span class="cat-tag" style="background:${CAT_COLORS[tx.category]||'#6b7280'}18;color:${CAT_COLORS[tx.category]||'#6b7280'}">${tx.category}</span>
+          ${tx.source==='Gmail'?'<span class="text-xs text-blue-400">Gmail</span>':''}
+          ${tx.note?`<span class="text-xs text-gray-400 truncate max-w-[100px]">${tx.note}</span>`:''}
+        </div>
+      </div>
+      <span class="font-semibold text-red-500 text-sm flex-shrink-0">-NT$${tx.amount.toLocaleString()}</span>
+      <div class="hidden group-hover:flex gap-1 flex-shrink-0">
+        <button onclick="openEditModal(${tx.rowIndex})" class="p-1.5 text-gray-400 hover:text-indigo-600 rounded hover:bg-indigo-50" title="編輯">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg>
+        </button>
+        <button onclick="deleteTx(${tx.rowIndex})" class="p-1.5 text-gray-400 hover:text-red-500 rounded hover:bg-red-50" title="刪除">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+        </button>
+      </div>
+    </div>`).join('');
+}
+
+// ============================================================
+// Transaction CRUD
+// ============================================================
+function openAddModal() {
+  document.getElementById('txModalTitle').textContent = '新增交易';
+  document.getElementById('txRowIndex').value = '';
+  document.getElementById('txDate').value = fmtDate(new Date());
+  document.getElementById('txTime').value = fmtTime(new Date());
+  document.getElementById('txAmount').value = '';
+  document.getElementById('txMerchant').value = '';
+  document.getElementById('txCategory').value = '其他';
+  document.getElementById('txCard').value = '';
+  document.getElementById('txNote').value = '';
+  showModal('txModal');
+}
+
+function openEditModal(rowIndex) {
+  const tx = allTx.find(t => t.rowIndex === rowIndex);
+  if (!tx) return;
+  document.getElementById('txModalTitle').textContent = '編輯交易';
+  document.getElementById('txRowIndex').value  = rowIndex;
+  document.getElementById('txDate').value      = tx.date;
+  document.getElementById('txTime').value      = tx.time;
+  document.getElementById('txAmount').value    = tx.amount;
+  document.getElementById('txMerchant').value  = tx.merchant;
+  document.getElementById('txCategory').value  = tx.category;
+  document.getElementById('txCard').value      = tx.card;
+  document.getElementById('txNote').value      = tx.note;
+  showModal('txModal');
+}
+
+async function saveTx(e) {
+  e.preventDefault();
+  const rowIndex = parseInt(document.getElementById('txRowIndex').value) || null;
+  const existing = rowIndex ? allTx.find(t => t.rowIndex === rowIndex) : null;
+  const tx = {
+    date:     document.getElementById('txDate').value,
+    time:     document.getElementById('txTime').value,
+    amount:   parseFloat(document.getElementById('txAmount').value),
+    merchant: document.getElementById('txMerchant').value.trim(),
+    category: document.getElementById('txCategory').value,
+    card:     document.getElementById('txCard').value.trim(),
+    note:     document.getElementById('txNote').value.trim(),
+    source:   existing?.source || '手動',
+    gmailId:  existing?.gmailId || ''
+  };
+  try {
+    if (rowIndex) { await updateRow(rowIndex, tx); } else { await appendRows([tx]); }
+    await loadTransactions(); renderAll(); closeModal('txModal');
+    showToast(rowIndex ? '交易已更新' : '交易已新增');
+  } catch (e) { showToast('儲存失敗: ' + e.message, true); }
+}
+
+async function deleteTx(rowIndex) {
+  if (!confirm('確定要刪除這筆交易嗎？')) return;
+  try {
+    await deleteRow(rowIndex); await loadTransactions(); renderAll();
+    showToast('交易已刪除');
+  } catch (e) { showToast('刪除失敗: ' + e.message, true); }
+}
+
+// ============================================================
+// API Helpers
+// ============================================================
+async function apiGet(url) {
+  const r = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+  if (r.status === 401) throw new Error('認證已過期，請重新整理頁面並重新登入');
+  if (!r.ok) { const t = await r.text(); throw new Error(`HTTP ${r.status}: ${t}`); }
+  return r.json();
+}
+async function apiPost(url, body) {
+  const r = await fetch(url, { method: 'POST', headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  if (!r.ok) { const t = await r.text(); throw new Error(`HTTP ${r.status}: ${t}`); }
+  return r.json();
+}
+async function apiPut(url, body) {
+  const r = await fetch(url, { method: 'PUT', headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  if (!r.ok) { const t = await r.text(); throw new Error(`HTTP ${r.status}: ${t}`); }
+  return r.json();
+}
+
+// ============================================================
+// Utils
+// ============================================================
+function fmtDate(d) { return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
+function fmtTime(d) { return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; }
+function showModal(id) { document.getElementById(id).classList.remove('hidden'); }
+function closeModal(id) { document.getElementById(id).classList.add('hidden'); }
+function showToast(msg, isErr=false) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = `fixed bottom-5 right-5 z-50 px-4 py-2.5 rounded-lg text-sm shadow-xl fade-in text-white ${isErr?'bg-red-600':'bg-gray-800'}`;
+  el.classList.remove('hidden');
+  clearTimeout(showToast._t);
+  showToast._t = setTimeout(() => el.classList.add('hidden'), 3200);
+}
+</script>
+</body>
+</html>
